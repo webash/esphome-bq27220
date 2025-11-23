@@ -1,34 +1,26 @@
 #include "bq27220.h"
 #include "bq27220_data_memory.h"
+#include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #define BQ27220_ID (0x0220u)
 /** Delay between 2 writes into Subclass/MAC area. Fails at ~120us. */
 #define BQ27220_MAC_WRITE_DELAY_US (250u)
-#define BQ27220_MAC_WRITE_DELAY_MS (0.25)
 /** Delay between we ask chip to load data to MAC and it become valid. Fails at ~500us. */
 #define BQ27220_SELECT_DELAY_US (1000u)
-#define BQ27220_SELECT_DELAY_MS (1)
 /** Delay between 2 control operations(like unseal or full access). Fails at ~2500us.*/
 #define BQ27220_MAGIC_DELAY_US (5000u)
-#define BQ27220_MAGIC_DELAY_MS (5)
 /** Delay before freshly written configuration can be read. Fails at ? */
 #define BQ27220_CONFIG_DELAY_US (10000u)
-#define BQ27220_CONFIG_DELAY_MS (10)
 /** Config apply delay. Must wait, or DM read returns garbage. */
 #define BQ27220_CONFIG_APPLY_US (2000000u)
-#define BQ27220_CONFIG_APPLY_MS (2000)
 /** Timeout for common operations. */
 #define BQ27220_TIMEOUT_COMMON_US (2000000u)
-#define BQ27220_TIMEOUT_COMMON_MS (2000)
 /** Timeout for reset operation. Normally reset takes ~2s. */
 #define BQ27220_TIMEOUT_RESET_US (4000000u)
-#define BQ27220_TIMEOUT_RESET_MS (4000)
 /** Timeout cycle interval  */
 #define BQ27220_TIMEOUT_CYCLE_INTERVAL_US (1000u)
-#define BQ27220_TIMEOUT_CYCLE_INTERVAL_MS (1)
 /** Timeout cycles count helper */
-//#define BQ27220_TIMEOUT(timeout_us) ((timeout_us) / (BQ27220_TIMEOUT_CYCLE_INTERVAL_US))
-#define BQ27220_TIMEOUT(timeout_ms) ((timeout_ms) / (BQ27220_TIMEOUT_CYCLE_INTERVAL_MS))
+#define BQ27220_TIMEOUT(timeout_us) ((timeout_us) / (BQ27220_TIMEOUT_CYCLE_INTERVAL_US))
 
 namespace esphome {
 namespace bq27220 {
@@ -68,7 +60,7 @@ bool BQ27220Component::parameterCheck(uint16_t address, uint32_t value, size_t s
                 break;
             }
             // We must wait, otherwise write will fail
-            delay(BQ27220_MAC_WRITE_DELAY_MS);
+            delayMicroseconds(BQ27220_MAC_WRITE_DELAY_US);
 
             // Calculate the check sum: 0xFF - (sum of address and data) OR 0xFF
             uint8_t checksum = bq27220_get_checksum(buffer, size + 2);
@@ -81,7 +73,7 @@ bool BQ27220Component::parameterCheck(uint16_t address, uint32_t value, size_t s
                 break;
             }
             // We must wait, otherwise write will fail
-            delay(BQ27220_CONFIG_DELAY_MS);
+            delayMicroseconds(BQ27220_CONFIG_DELAY_US);
             ret = true;
         } else {
             if(!this->write_register(static_cast<uint8_t>(CommandSelectSubclass), buffer, 2)) {
@@ -89,14 +81,14 @@ bool BQ27220Component::parameterCheck(uint16_t address, uint32_t value, size_t s
                 break;
             }
             // bqstudio uses 15ms wait delay here
-            delay(BQ27220_SELECT_DELAY_MS);
+            delayMicroseconds(BQ27220_SELECT_DELAY_US);
 
             if(!this->read_register(static_cast<uint8_t>(CommandMACData), old_data, size)) {
                 ESP_LOGD(TAG, "(%d) DM read failed\n", __LINE__);
                 break;
             }
             // bqstudio uses burst reads with continue(CommandSelectSubclass without argument) and ~5ms between burst
-            delay(BQ27220_SELECT_DELAY_MS);
+            delayMicroseconds(BQ27220_SELECT_DELAY_US);
 
             if(*(uint32_t*)&(old_data[0]) != *(uint32_t*)&(buffer[2])) {
                 ESP_LOGD(TAG, 
@@ -132,7 +124,7 @@ bool BQ27220Component::dateMemoryCheck(const BQ27220DMData *data_memory, bool up
             } else if(operation_status.reg.CFGUPDATE) {
                 break;
             };
-            delay(BQ27220_TIMEOUT_CYCLE_INTERVAL_MS);
+            delayMicroseconds(BQ27220_TIMEOUT_CYCLE_INTERVAL_US);
         }
 
         if(timeout == 0) {
@@ -181,7 +173,7 @@ bool BQ27220Component::dateMemoryCheck(const BQ27220DMData *data_memory, bool up
         controlSubCmd(Control_EXIT_CFG_UPDATE_REINIT);
 
         // Wait for gauge to apply new configuration
-        delay(BQ27220_CONFIG_APPLY_MS);
+        delayMicroseconds(BQ27220_CONFIG_APPLY_US);
 
         // ensure that we exited config update mode
         uint32_t timeout = BQ27220_TIMEOUT(BQ27220_TIMEOUT_COMMON_US);
@@ -192,7 +184,7 @@ bool BQ27220Component::dateMemoryCheck(const BQ27220DMData *data_memory, bool up
             } else if(operation_status.reg.CFGUPDATE != true) {
                 break;
             }
-            delay(BQ27220_TIMEOUT_CYCLE_INTERVAL_MS);
+            delayMicroseconds(BQ27220_TIMEOUT_CYCLE_INTERVAL_US);
         }
 
         // Check timeout
@@ -299,7 +291,7 @@ bool BQ27220Component::reset(void)
             }else if(operat.reg.INITCOMP == true){
                 break;
             }
-            delay(BQ27220_TIMEOUT_CYCLE_INTERVAL_MS); // delay(2);
+            delayMicroseconds(BQ27220_TIMEOUT_CYCLE_INTERVAL_US); // delay(2);
         }
         if(timeout == 0) {
             ESP_LOGD(TAG, "INITCOMP timeout after reset");
@@ -326,7 +318,7 @@ bool BQ27220Component::sealAccess(void)
 
         controlSubCmd(Control_SEALED);
         // delay(10);
-        delay(BQ27220_SELECT_DELAY_MS);
+        delayMicroseconds(BQ27220_SELECT_DELAY_US);
 
         getOperationStatus(&operat);
         if(operat.reg.SEC != Bq27220OperationStatusSecSealed)
@@ -353,9 +345,9 @@ bool BQ27220Component::unsealAccess(void)
         }
 
         controlSubCmd(UnsealKey1);
-        delay(BQ27220_MAGIC_DELAY_MS); // delay(10);
+        delayMicroseconds(BQ27220_MAGIC_DELAY_US); // delay(10);
         controlSubCmd(UnsealKey2);
-        delay(BQ27220_MAGIC_DELAY_MS);  // delay(10);
+        delayMicroseconds(BQ27220_MAGIC_DELAY_US);  // delay(10);
 
         getOperationStatus(&operat);
         if(operat.reg.SEC != Bq27220OperationStatusSecUnsealed)
@@ -402,9 +394,9 @@ bool BQ27220Component::fullAccess(void)
         }
 
         controlSubCmd(FullAccessKey);
-        delay(BQ27220_MAGIC_DELAY_MS); //delay(10);
+        delayMicroseconds(BQ27220_MAGIC_DELAY_US); //delay(10);
         controlSubCmd(FullAccessKey);
-        delay(BQ27220_MAGIC_DELAY_MS); //delay(10);
+        delayMicroseconds(BQ27220_MAGIC_DELAY_US); //delay(10);
 
         if(!getOperationStatus(&operat)){
             ESP_LOGD(TAG, "Status query failed");
@@ -426,7 +418,7 @@ uint16_t BQ27220Component::getDeviceNumber(void)
     controlSubCmd(Control_DEVICE_NUMBER);
     // Enterprise wait(MAC read fails if less than 500us)
     // bqstudio uses ~15ms 
-    delay(BQ27220_SELECT_DELAY_MS); // delay(15);
+    delayMicroseconds(BQ27220_SELECT_DELAY_US); // delay(15);
     // Read id data from MAC scratch space
     this->read_register(static_cast<uint8_t>(CommandMACData), (uint8_t *)&devid, 2);
 
@@ -462,7 +454,7 @@ bool BQ27220Component::getGaugingStatus(BQ27220GaugingStatus *gauging_sta)
     // Request gauging data to be loaded to MAC
     controlSubCmd(Control_GAUGING_STATUS);
     // Wait for data being loaded to MAC
-    delay(BQ27220_SELECT_DELAY_MS);
+    delayMicroseconds(BQ27220_SELECT_DELAY_US);
     // Read id data from MAC scratch space
     (*gauging_sta).full = readRegU16(CommandMACData);
     return true;
