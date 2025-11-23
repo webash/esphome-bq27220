@@ -4,22 +4,31 @@
 #define BQ27220_ID (0x0220u)
 /** Delay between 2 writes into Subclass/MAC area. Fails at ~120us. */
 #define BQ27220_MAC_WRITE_DELAY_US (250u)
+#define BQ27220_MAC_WRITE_DELAY_MS (0.25)
 /** Delay between we ask chip to load data to MAC and it become valid. Fails at ~500us. */
 #define BQ27220_SELECT_DELAY_US (1000u)
+#define BQ27220_SELECT_DELAY_MS (1)
 /** Delay between 2 control operations(like unseal or full access). Fails at ~2500us.*/
 #define BQ27220_MAGIC_DELAY_US (5000u)
+#define BQ27220_MAGIC_DELAY_MS (5)
 /** Delay before freshly written configuration can be read. Fails at ? */
 #define BQ27220_CONFIG_DELAY_US (10000u)
+#define BQ27220_CONFIG_DELAY_MS (10)
 /** Config apply delay. Must wait, or DM read returns garbage. */
 #define BQ27220_CONFIG_APPLY_US (2000000u)
+#define BQ27220_CONFIG_APPLY_MS (2000)
 /** Timeout for common operations. */
 #define BQ27220_TIMEOUT_COMMON_US (2000000u)
+#define BQ27220_TIMEOUT_COMMON_MS (2000)
 /** Timeout for reset operation. Normally reset takes ~2s. */
 #define BQ27220_TIMEOUT_RESET_US (4000000u)
+#define BQ27220_TIMEOUT_RESET_MS (4000)
 /** Timeout cycle interval  */
 #define BQ27220_TIMEOUT_CYCLE_INTERVAL_US (1000u)
+#define BQ27220_TIMEOUT_CYCLE_INTERVAL_MS (1)
 /** Timeout cycles count helper */
-#define BQ27220_TIMEOUT(timeout_us) ((timeout_us) / (BQ27220_TIMEOUT_CYCLE_INTERVAL_US))
+//#define BQ27220_TIMEOUT(timeout_us) ((timeout_us) / (BQ27220_TIMEOUT_CYCLE_INTERVAL_US))
+#define BQ27220_TIMEOUT(timeout_ms) ((timeout_ms) / (BQ27220_TIMEOUT_CYCLE_INTERVAL_MS))
 
 namespace esphome {
 namespace bq27220 {
@@ -37,7 +46,7 @@ static uint8_t bq27220_get_checksum(uint8_t* data, uint16_t len) {
 bool BQ27220Component::parameterCheck(uint16_t address, uint32_t value, size_t size, bool update)
 {
     if(!(size == 1 || size == 2 || size == 4)) {
-        Serial.printf("(%d) Parameter size error\n", __LINE__);
+        ESP_LOGD(TAG, "(%d) Parameter size error\n", __LINE__);
         return false;
     }
 
@@ -55,11 +64,11 @@ bool BQ27220Component::parameterCheck(uint16_t address, uint32_t value, size_t s
 
         if(update) {
             if(!this->write_register(static_cast<uint8_t>(CommandSelectSubclass), buffer, size + 2)) {
-                Serial.printf("(%d) DM write failed\n", __LINE__);
+                ESP_LOGD(TAG, "(%d) DM write failed\n", __LINE__);
                 break;
             }
             // We must wait, otherwise write will fail
-            delayMicroseconds(BQ27220_MAC_WRITE_DELAY_US);
+            delay(BQ27220_MAC_WRITE_DELAY_MS);
 
             // Calculate the check sum: 0xFF - (sum of address and data) OR 0xFF
             uint8_t checksum = bq27220_get_checksum(buffer, size + 2);
@@ -68,29 +77,29 @@ bool BQ27220Component::parameterCheck(uint16_t address, uint32_t value, size_t s
             // 2 bytes address, `size` bytes data, 1 byte check sum, 1 byte length
             buffer[1] = 2 + size + 1 + 1;
             if(!this->write_register(static_cast<uint8_t>(CommandMACDataSum), buffer, size + 2)) {
-                Serial.printf("(%d) CRC write failed\n", __LINE__);
+                ESP_LOGD(TAG, "(%d) CRC write failed\n", __LINE__);
                 break;
             }
             // We must wait, otherwise write will fail
-            delayMicroseconds(BQ27220_CONFIG_DELAY_US);
+            delay(BQ27220_CONFIG_DELAY_MS);
             ret = true;
         } else {
             if(!this->write_register(static_cast<uint8_t>(CommandSelectSubclass), buffer, 2)) {
-                Serial.printf("(%d) DM SelectSubclass for read failed\n", __LINE__);
+                ESP_LOGD(TAG, "(%d) DM SelectSubclass for read failed\n", __LINE__);
                 break;
             }
             // bqstudio uses 15ms wait delay here
-            delayMicroseconds(BQ27220_SELECT_DELAY_US);
+            delay(BQ27220_SELECT_DELAY_MS);
 
             if(!this->read_register(static_cast<uint8_t>(CommandMACData), old_data, size)) {
-                Serial.printf("(%d) DM read failed\n", __LINE__);
+                ESP_LOGD(TAG, "(%d) DM read failed\n", __LINE__);
                 break;
             }
             // bqstudio uses burst reads with continue(CommandSelectSubclass without argument) and ~5ms between burst
-            delayMicroseconds(BQ27220_SELECT_DELAY_US);
+            delay(BQ27220_SELECT_DELAY_MS);
 
             if(*(uint32_t*)&(old_data[0]) != *(uint32_t*)&(buffer[2])) {
-                Serial.printf(
+                ESP_LOGD(TAG, 
                     "(%d) Data at 0x%04x(%zu): 0x%08lx!=0x%08lx\n", __LINE__,
                     address,
                     size,
@@ -110,7 +119,7 @@ bool BQ27220Component::dateMemoryCheck(const BQ27220DMData *data_memory, bool up
     if(update) {
         const uint16_t cfg_request = Control_ENTER_CFG_UPDATE;
         if(!this->write_register(static_cast<uint8_t>(CommandSelectSubclass), (uint8_t*)&cfg_request, sizeof(cfg_request))) {
-            Serial.printf("(%d) ENTER_CFG_UPDATE command failed", __LINE__);
+            ESP_LOGD(TAG, "(%d) ENTER_CFG_UPDATE command failed", __LINE__);
             return false;
         }
 
@@ -119,15 +128,15 @@ bool BQ27220Component::dateMemoryCheck(const BQ27220DMData *data_memory, bool up
         BQ27220OperationStatus operation_status;
         while(--timeout > 0) {
             if(!getOperationStatus(&operation_status)) {
-                Serial.printf("(%d) Failed to get operation status, retries left %lu", __LINE__, timeout);
+                ESP_LOGD(TAG, "(%d) Failed to get operation status, retries left %lu", __LINE__, timeout);
             } else if(operation_status.reg.CFGUPDATE) {
                 break;
             };
-            delayMicroseconds(BQ27220_TIMEOUT_CYCLE_INTERVAL_US);
+            delay(BQ27220_TIMEOUT_CYCLE_INTERVAL_MS);
         }
 
         if(timeout == 0) {
-            Serial.printf(
+            ESP_LOGD(TAG, 
                 "(%d) Enter CFGUPDATE mode failed, CFG %u, SEC %u", __LINE__,
                 operation_status.reg.CFGUPDATE,
                 operation_status.reg.SEC);
@@ -162,7 +171,7 @@ bool BQ27220Component::dateMemoryCheck(const BQ27220DMData *data_memory, bool up
         } else if(data_memory->type == BQ27220DMTypePtr32) {
             result &= parameterCheck(data_memory->address, *(uint32_t*)data_memory->value.u32, 4, update);
         } else {
-            Serial.printf("(%d) Invalid DM Type\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Invalid DM Type\n", __LINE__);
         }
         data_memory++;
     }
@@ -172,23 +181,23 @@ bool BQ27220Component::dateMemoryCheck(const BQ27220DMData *data_memory, bool up
         controlSubCmd(Control_EXIT_CFG_UPDATE_REINIT);
 
         // Wait for gauge to apply new configuration
-        delayMicroseconds(BQ27220_CONFIG_APPLY_US);
+        delay(BQ27220_CONFIG_APPLY_MS);
 
         // ensure that we exited config update mode
         uint32_t timeout = BQ27220_TIMEOUT(BQ27220_TIMEOUT_COMMON_US);
         BQ27220OperationStatus operation_status;
         while(--timeout > 0) {
             if(!getOperationStatus(&operation_status)) {
-                Serial.printf("(%d) Failed to get operation status, retries left %lu\n", __LINE__, timeout);
+                ESP_LOGD(TAG, "(%d) Failed to get operation status, retries left %lu\n", __LINE__, timeout);
             } else if(operation_status.reg.CFGUPDATE != true) {
                 break;
             }
-            delayMicroseconds(BQ27220_TIMEOUT_CYCLE_INTERVAL_US);
+            delay(BQ27220_TIMEOUT_CYCLE_INTERVAL_MS);
         }
 
         // Check timeout
         if(timeout == 0) {
-            Serial.printf("(%d) Exit CFGUPDATE mode failed\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Exit CFGUPDATE mode failed\n", __LINE__);
             return false;
         }
     }
@@ -203,7 +212,7 @@ bool BQ27220Component::init(const BQ27220DMData *data_memory)
     do{
         uint16_t data = getDeviceNumber();
         if(data != BQ27220_ID) {
-            Serial.printf("(%d) Invalid Device Number %04x != 0x0220\n", __LINE__, data);
+            ESP_LOGD(TAG, "(%d) Invalid Device Number %04x != 0x0220\n", __LINE__, data);
             break;
         }
         
@@ -218,28 +227,28 @@ bool BQ27220Component::init(const BQ27220DMData *data_memory)
             break;
         }
         if(!operat.reg.INITCOMP || operat.reg.CFGUPDATE) {
-            Serial.printf("(%d) Incorrect state, reset needed\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Incorrect state, reset needed\n", __LINE__);
             reset_and_provisioning_required = true;
         }
 
         // Ensure correct profile is selected
-        Serial.printf("(%d) Checking chosen profile\n", __LINE__);
+        ESP_LOGD(TAG, "(%d) Checking chosen profile\n", __LINE__);
         BQ27220ControlStatus control_status;
         if(!getControlStatus(&control_status)) {
-            Serial.printf("(%d) Failed to get control status\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Failed to get control status\n", __LINE__);
             break;
         }
         if(control_status.reg.BATT_ID != 0) {
-            Serial.printf("(%d) Incorrect profile, reset needed\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Incorrect profile, reset needed\n", __LINE__);
             reset_and_provisioning_required = true;
         }
 
         // Ensure correct configuration loaded into gauge DataMemory
         // Only if reset is not required, otherwise we don't
         if(!reset_and_provisioning_required) {
-            Serial.printf("(%d) Checking data memory\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Checking data memory\n", __LINE__);
             if(!dateMemoryCheck(data_memory, false)) {
-                Serial.printf("(%d) Incorrect configuration data, reset needed\n", __LINE__);
+                ESP_LOGD(TAG, "(%d) Incorrect configuration data, reset needed\n", __LINE__);
                 reset_and_provisioning_required = true;
             }
         }
@@ -247,7 +256,7 @@ bool BQ27220Component::init(const BQ27220DMData *data_memory)
         // Reset needed
         if(reset_and_provisioning_required) {
             if(!reset()) {
-                Serial.printf("(%d) Failed to reset device\n", __LINE__);
+                ESP_LOGD(TAG, "(%d) Failed to reset device\n", __LINE__);
             }
 
             // Get full access to read and modify parameters
@@ -257,16 +266,16 @@ bool BQ27220Component::init(const BQ27220DMData *data_memory)
             }
 
             // Update memory
-            Serial.printf("(%d) Updating data memory\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Updating data memory\n", __LINE__);
             dateMemoryCheck(data_memory, true);
             if(!dateMemoryCheck(data_memory, false)) {
-                Serial.printf("(%d) Data memory update failed\n", __LINE__);
+                ESP_LOGD(TAG, "(%d) Data memory update failed\n", __LINE__);
                 break;
             }
         }
 
         if(!sealAccess()) {
-            Serial.printf("(%d) Seal failed\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Seal failed\n", __LINE__);
             break;
         }
 
@@ -286,17 +295,17 @@ bool BQ27220Component::reset(void)
         while (--timeout > 0)
         {
             if(!getOperationStatus(&operat)){
-                Serial.printf("Failed to get operation status, retries left %lu\n", timeout);
+                ESP_LOGD(TAG, "Failed to get operation status, retries left %lu\n", timeout);
             }else if(operat.reg.INITCOMP == true){
                 break;
             }
-            delayMicroseconds(BQ27220_TIMEOUT_CYCLE_INTERVAL_US); // delay(2);
+            delay(BQ27220_TIMEOUT_CYCLE_INTERVAL_MS); // delay(2);
         }
         if(timeout == 0) {
-            Serial.println("INITCOMP timeout after reset");
+            ESP_LOGD(TAG, "INITCOMP timeout after reset");
             break;
         }
-        Serial.printf("(%d) Cycles left: %lu\n", __LINE__, timeout);
+        ESP_LOGD(TAG, "(%d) Cycles left: %lu\n", __LINE__, timeout);
         result = true;
     } while(0);
     return result;
@@ -317,12 +326,12 @@ bool BQ27220Component::sealAccess(void)
 
         controlSubCmd(Control_SEALED);
         // delay(10);
-        delayMicroseconds(BQ27220_SELECT_DELAY_US);
+        delay(BQ27220_SELECT_DELAY_MS);
 
         getOperationStatus(&operat);
         if(operat.reg.SEC != Bq27220OperationStatusSecSealed)
         {
-            Serial.printf("Seal failed %u\n", operat.reg.SEC);
+            ESP_LOGD(TAG, "Seal failed %u\n", operat.reg.SEC);
             break;
         }
         result = true;
@@ -344,14 +353,14 @@ bool BQ27220Component::unsealAccess(void)
         }
 
         controlSubCmd(UnsealKey1);
-        delayMicroseconds(BQ27220_MAGIC_DELAY_US); // delay(10);
+        delay(BQ27220_MAGIC_DELAY_MS); // delay(10);
         controlSubCmd(UnsealKey2);
-        delayMicroseconds(BQ27220_MAGIC_DELAY_US);  // delay(10);
+        delay(BQ27220_MAGIC_DELAY_MS);  // delay(10);
 
         getOperationStatus(&operat);
         if(operat.reg.SEC != Bq27220OperationStatusSecUnsealed)
         {
-            Serial.printf("Unseal failed %u\n", operat.reg.SEC);
+            ESP_LOGD(TAG, "Unseal failed %u\n", operat.reg.SEC);
             break;
         }
         result = true;
@@ -370,16 +379,16 @@ bool BQ27220Component::fullAccess(void)
         while (--timeout > 0)
         {
             if(!getOperationStatus(&operat)){
-                Serial.printf("Failed to get operation status, retries left %lu\n", timeout);
+                ESP_LOGD(TAG, "Failed to get operation status, retries left %lu\n", timeout);
             }else {
                 break;
             }
         }
         if(timeout == 0) {
-            Serial.println("Failed to get operation status");
+            ESP_LOGD(TAG, "Failed to get operation status");
             break;
         }
-        // Serial.printf("Cycles left: %lu\n", timeout);
+        // ESP_LOGD(TAG, "Cycles left: %lu\n", timeout);
 
         // Already full access
         if(operat.reg.SEC == Bq27220OperationStatusSecFull){
@@ -388,21 +397,21 @@ bool BQ27220Component::fullAccess(void)
         }
         // Must be unsealed to get full access
         if(operat.reg.SEC != Bq27220OperationStatusSecUnsealed){
-            Serial.printf("(%d) Not in unsealed state\n", __LINE__);
+            ESP_LOGD(TAG, "(%d) Not in unsealed state\n", __LINE__);
             break;
         }
 
         controlSubCmd(FullAccessKey);
-        delayMicroseconds(BQ27220_MAGIC_DELAY_US); //delay(10);
+        delay(BQ27220_MAGIC_DELAY_MS); //delay(10);
         controlSubCmd(FullAccessKey);
-        delayMicroseconds(BQ27220_MAGIC_DELAY_US); //delay(10);
+        delay(BQ27220_MAGIC_DELAY_MS); //delay(10);
 
         if(!getOperationStatus(&operat)){
-            Serial.println("Status query failed");
+            ESP_LOGD(TAG, "Status query failed");
             break;
         }
         if(operat.reg.SEC != Bq27220OperationStatusSecFull){
-            Serial.printf("Full access failed %u\n", operat.reg.SEC);
+            ESP_LOGD(TAG, "Full access failed %u\n", operat.reg.SEC);
             break;
         }
         result = true;
@@ -417,11 +426,11 @@ uint16_t BQ27220Component::getDeviceNumber(void)
     controlSubCmd(Control_DEVICE_NUMBER);
     // Enterprise wait(MAC read fails if less than 500us)
     // bqstudio uses ~15ms 
-    delayMicroseconds(BQ27220_SELECT_DELAY_US); // delay(15);
+    delay(BQ27220_SELECT_DELAY_MS); // delay(15);
     // Read id data from MAC scratch space
     this->read_register(static_cast<uint8_t>(CommandMACData), (uint8_t *)&devid, 2);
 
-    // Serial.printf("device number:0x%x\n", devid);
+    // ESP_LOGD(TAG, "device number:0x%x\n", devid);
     return devid;
 }
 
@@ -453,7 +462,7 @@ bool BQ27220Component::getGaugingStatus(BQ27220GaugingStatus *gauging_sta)
     // Request gauging data to be loaded to MAC
     controlSubCmd(Control_GAUGING_STATUS);
     // Wait for data being loaded to MAC
-    delayMicroseconds(BQ27220_SELECT_DELAY_US);
+    delay(BQ27220_SELECT_DELAY_MS);
     // Read id data from MAC scratch space
     (*gauging_sta).full = readRegU16(CommandMACData);
     return true;
