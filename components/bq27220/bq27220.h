@@ -11,7 +11,7 @@
 #include "esphome/components/sensor/sensor.h"
 
 //FROM LILYGO
-#include "Arduino.h"
+//#include "Arduino.h"
 #include "bq27220_def.h"
 #include "bq27220_data_memory.h"
 //END FROM LILYGO
